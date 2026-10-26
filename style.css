@@ -1,0 +1,74 @@
+/* Coin Rush styles. Colours are defined once here so they are easy to change. */
+:root {
+  --ink: #17112b;
+  --panel: #241b45;
+  --gold: #ffc928;
+  --coral: #ff5a4e;
+  --mint: #5ee6c1;
+  --cream: #fff4d6;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; height: 100%; overflow: hidden;
+  background: var(--ink); color: var(--cream);
+  font-family: "Trebuchet MS", "Segoe UI", Verdana, sans-serif;
+  -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none;
+}
+body { display: flex; align-items: center; justify-content: center; }
+
+/* The game box. JavaScript sets its size and the --u scale value. */
+#game { position: relative; touch-action: none; }
+#canvas { display: block; width: 100%; height: 100%; }
+.hidden { display: none !important; }
+
+#hud {
+  position: absolute; top: 0; left: 0; right: 0;
+  height: calc(var(--u) * 56px);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 calc(var(--u) * 20px);
+  font-size: max(13px, calc(var(--u) * 22px));
+  pointer-events: none;
+}
+.stat b { color: var(--gold); margin-left: .25em; font-size: 1.15em; }
+#time.low { color: var(--coral); }
+.heart { color: var(--coral); font-size: 1.3em; margin-left: .1em; }
+.heart.lost { color: #4b3f7a; }
+
+#soundBtn {
+  position: absolute; right: 8px; bottom: 8px;
+  font: inherit; font-size: 13px; padding: 6px 10px;
+  background: rgba(0,0,0,.35); color: var(--cream);
+  border: 1px solid rgba(255,244,214,.3); border-radius: 8px; cursor: pointer;
+}
+
+.screen {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(23, 17, 43, .8);
+}
+.panel {
+  width: min(86%, 440px); text-align: center;
+  padding: calc(var(--u) * 28px) calc(var(--u) * 24px);
+  background: var(--panel); border: 3px solid var(--gold); border-radius: 18px;
+  font-size: max(14px, calc(var(--u) * 20px));
+}
+.panel h1 {
+  margin: 0 0 .4em; color: var(--gold); letter-spacing: .02em;
+  font-size: max(30px, calc(var(--u) * 52px));
+  text-shadow: 0 3px 0 #8a5a00;
+}
+.panel p { margin: .6em 0; line-height: 1.4; }
+.panel .big { font-size: 1.5em; }
+.panel .big b { color: var(--gold); }
+.panel .hint { font-size: .8em; opacity: .8; }
+
+.panel button {
+  font: inherit; font-weight: bold; font-size: 1.15em;
+  padding: .6em 1.6em; margin: .5em 0;
+  background: var(--gold); color: #3a2500;
+  border: 0; border-radius: 999px; cursor: pointer;
+  box-shadow: 0 4px 0 #8a5a00;
+}
+.panel button:hover { filter: brightness(1.08); }
+.panel button:active { transform: translateY(3px); box-shadow: 0 1px 0 #8a5a00; }
+.panel button:focus-visible, #soundBtn:focus-visible { outline: 3px solid var(--mint); outline-offset: 3px; }

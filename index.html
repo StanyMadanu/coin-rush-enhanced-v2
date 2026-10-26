@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Coin Rush</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game">
+    <canvas id="canvas"></canvas>
+
+    <!-- Score, timer and lives (shown while playing) -->
+    <div id="hud" class="hidden">
+      <div class="stat">Score <b id="score">0</b></div>
+      <div class="stat">Time <b id="time">60</b></div>
+      <div class="stat" id="lives" aria-label="Lives"></div>
+    </div>
+
+    <button id="soundBtn" type="button">Sound: On</button>
+
+    <!-- Start screen -->
+    <div id="start" class="screen">
+      <div class="panel">
+        <h1>Coin Rush</h1>
+        <p>Collect glowing coins, dodge the roaming hazards, and grab rare diamonds for extra time.<br>You have 3 lives and 60 seconds.</p>
+        <button id="startBtn" type="button">Start game</button>
+        <p class="hint">Move with <b>W A S D</b> or the <b>arrow keys</b>.<br>On a phone: touch and drag in the control area below the arena.</p>
+      </div>
+    </div>
+
+    <!-- Game-over screen -->
+    <div id="over" class="screen hidden">
+      <div class="panel">
+        <h1>Game over</h1>
+        <p id="reason"></p>
+        <p class="big">Score <b id="finalScore">0</b></p>
+        <p id="best"></p>
+        <button id="restartBtn" type="button">Play again</button>
+      </div>
+    </div>
+  </div>
+  <script src="game.js"></script>
+</body>
+</html>
