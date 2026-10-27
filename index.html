@@ -2,30 +2,60 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#17112b">
   <title>Coin Rush</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="game">
+  <div id="game" data-state="menu">
     <canvas id="canvas"></canvas>
+    <div id="safe" aria-hidden="true"></div>
 
-    <!-- Score, timer and lives (shown while playing) -->
+    <!-- Score, stage, timer, bomb charge and lives (shown while playing) -->
     <div id="hud" class="hidden">
-      <div class="stat">Score <b id="score">0</b></div>
-      <div class="stat">Time <b id="time">60</b></div>
-      <div class="stat" id="lives" aria-label="Lives"></div>
+      <div class="cell left">
+        <div class="tag" id="stageTag">STAGE 1</div>
+        <div class="stat">Score <b id="score">0</b></div>
+      </div>
+      <div class="cell center" id="timeBox" data-u="0">
+        <div class="tag">TIME</div>
+        <div class="time"><b id="time">60</b></div>
+      </div>
+      <div class="cell right">
+        <div id="lives" aria-label="Lives"></div>
+        <div class="pill" id="bombPill"><i></i>BOMB <span id="bombCount">0</span>/1</div>
+      </div>
     </div>
 
-    <button id="soundBtn" type="button">Sound: On</button>
+    <!-- Bottom bar: sound, pause, controls hint and the BLAST button -->
+    <div id="bar">
+      <div class="bar-left">
+        <button id="soundBtn" class="mini" type="button">Sound: On</button>
+        <button id="pauseBtn" class="mini pause-only" type="button">Pause</button>
+      </div>
+      <div id="barHint" class="hint-text"></div>
+      <button id="blastBtn" class="hidden" type="button" tabindex="-1" aria-label="Blast"><span>BLAST</span><small>SPACE</small></button>
+    </div>
 
     <!-- Start screen -->
     <div id="start" class="screen">
       <div class="panel">
         <h1>Coin Rush</h1>
-        <p>Collect glowing coins, dodge the roaming hazards, and grab rare diamonds for extra time.<br>You have 3 lives and 60 seconds.</p>
-        <button id="startBtn" type="button">Start game</button>
-        <p class="hint">Move with <b>W A S D</b> or the <b>arrow keys</b>.<br>On a phone: touch and drag in the control area below the arena.</p>
+        <div class="stages" id="stageChips"></div>
+        <p>Grab the gold coins. Dodge the spiky orbs.<br>You have 3 lives and 60 seconds.</p>
+        <button id="startBtn" class="main" type="button">Start game</button>
+        <p class="legend"><span class="c-time">Stopwatch</span> = +5 seconds &nbsp;&middot;&nbsp; <span class="c-bomb">Bomb</span> = one blast</p>
+        <p class="hint">Move with <b>W A S D</b> or the <b>arrow keys</b>, blast with <b>Space</b>.<br>On a phone: drag your finger to move, tap <b>BLAST</b>.</p>
+      </div>
+    </div>
+
+    <!-- Pause screen -->
+    <div id="pauseScreen" class="screen hidden">
+      <div class="panel">
+        <h1>Paused</h1>
+        <button id="resumeBtn" class="main" type="button">Resume</button>
+        <p class="hint">Press <b>P</b> to pause or resume.</p>
       </div>
     </div>
 
@@ -36,7 +66,7 @@
         <p id="reason"></p>
         <p class="big">Score <b id="finalScore">0</b></p>
         <p id="best"></p>
-        <button id="restartBtn" type="button">Play again</button>
+        <button id="restartBtn" class="main" type="button">Play again</button>
       </div>
     </div>
   </div>
