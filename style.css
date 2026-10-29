@@ -7,6 +7,7 @@
   --mint: #5ee6c1;
   --sky: #4cc9ff;
   --ember: #ff9f43;
+  --rose: #ff4d79;
   --cream: #fff4d6;
   --u: 1;
 }
@@ -36,13 +37,13 @@ body { position: fixed; inset: 0; }
   font-size: max(13px, calc(var(--u) * 21px)); pointer-events: none;
 }
 #hud .cell { display: flex; flex-direction: column; justify-content: center; gap: .1em; min-width: 0; }
-#hud .left { align-items: flex-start; }
-#hud .center { align-items: center; padding: 0 .8em; }
-#hud .right { align-items: flex-end; }
+#hud .left { grid-column: 1; align-items: flex-start; }
+#hud .center { grid-column: 2; align-items: center; padding: 0 .8em; }
+#hud .right { grid-column: 3; align-items: flex-end; }   /* fixed columns: the right block stays on the right even when the timer is hidden */
 .tag { font-size: .55em; letter-spacing: .16em; opacity: .75; font-weight: bold; line-height: 1; }
 .stat b { color: var(--gold); margin-left: .2em; font-size: 1.1em; }
 .time b { color: var(--gold); font-size: 1.5em; display: inline-block; line-height: 1; transform-origin: center; }
-.heart { color: var(--coral); font-size: 1.25em; margin-left: .08em; }
+.heart { color: var(--rose); font-size: 1.25em; margin-left: .08em; }
 .heart.lost { color: #4b3f7a; }
 .pill { font-size: .55em; letter-spacing: .08em; font-weight: bold; padding: .25em .7em; border-radius: 999px;
   background: rgba(0,0,0,.35); border: 1px solid rgba(255,244,214,.25); opacity: .6; white-space: nowrap; }
@@ -50,7 +51,8 @@ body { position: fixed; inset: 0; }
 .pill.on { opacity: 1; border-color: var(--ember); color: #ffe2bd; box-shadow: 0 0 10px rgba(255,159,67,.55); }
 .pill.on i { background: var(--ember); box-shadow: 0 0 6px var(--ember); }
 
-/* Main-timer warning: the number beats once per second in the last 10 seconds. */
+#game[data-timed="false"] #timeBox { display: none; }
+/* Main-timer warning (only on stages with a time limit): the number beats once per second in the last 10 seconds. */
 #timeBox[data-u="1"] .time b { color: #ffb347; }
 #timeBox[data-u="2"] .time b { color: var(--coral); }
 #timeBox[data-u="3"] .time b { color: #ff3b3b; }
@@ -77,6 +79,7 @@ body { position: fixed; inset: 0; }
 .mini:hover { background: rgba(255,244,214,.14); }
 .mini:active { transform: scale(.93); }
 #game:not([data-state="playing"]):not([data-state="paused"]) .pause-only,
+#game:not([data-state="playing"]):not([data-state="paused"]) #blastBtn,
 #game:not([data-state="playing"]) #barHint { display: none; }
 
 #blastBtn {
@@ -91,13 +94,24 @@ body { position: fixed; inset: 0; }
 #blastBtn span { font-size: 17px; letter-spacing: .08em; }
 #blastBtn small { font-size: 10px; opacity: .7; letter-spacing: .12em; }
 #blastBtn:active, #blastBtn.pressed { transform: translateY(3px) scale(.95); box-shadow: 0 1px 0 #a14f00; }
+/* Unavailable (no bomb yet): greyed out and calm. Ready: orange and glowing (above). Fired: a quick bright flash. */
+#blastBtn.off { background: linear-gradient(#4a4468, #3a3556); color: #a49dc2; box-shadow: 0 4px 0 #26213d; animation: none; cursor: default; opacity: .8; }
+#blastBtn.off:active { transform: none; box-shadow: 0 4px 0 #26213d; }
+#blastBtn.fired { animation: fired .45s ease-out; }
+@keyframes fired { 0% { transform: scale(1.2); box-shadow: 0 0 44px 14px rgba(255,214,150,.95); } 100% { transform: scale(1); } }
+#toast { position: absolute; left: 50%; bottom: calc(var(--bar) + env(safe-area-inset-bottom, 0px) + 12px); transform: translateX(-50%); z-index: 7;
+  max-width: 88%; padding: 9px 15px; border-radius: 10px; background: rgba(10,6,24,.85); border: 1px solid rgba(255,244,214,.3); font-size: 14px; text-align: center; pointer-events: none; }
 @keyframes ready { 50% { box-shadow: 0 4px 0 #a14f00, 0 0 28px rgba(255,159,67,.95); } }
 /* Touch layouts: bigger tap targets */
-#game.touch #blastBtn small, #game.touch .hint-text.desktop-only { display: none; }
 #game.touch.portrait #blastBtn { width: calc(var(--bar) - 28px); height: calc(var(--bar) - 28px); max-height: none; min-width: 0; max-width: 118px; max-height: 118px; border-radius: 50%; padding: 0; }
 #game.touch.portrait .hint-text { white-space: normal; font-size: 14px; }
 #game.touch .mini { padding: 10px 13px; font-size: 14px; }
-#game.touch.portrait .bar-left { flex-direction: column; align-items: stretch; }
+#game.touch.portrait .bar-left { flex-direction: column; align-items: stretch; gap: 6px; }
+#game.touch.portrait .mini { padding: 7px 12px; }
+/* On phones the BLAST button is on the LEFT (left thumb), the small buttons on the right, movement is done with the right thumb. */
+#game.touch #blastBtn { order: 1; }
+#game.touch .hint-text { order: 2; }
+#game.touch .bar-left { order: 3; }
 
 /* ---------- Screens ---------- */
 .screen {
@@ -120,7 +134,7 @@ body { position: fixed; inset: 0; }
 .panel .big b { color: var(--gold); }
 .panel .hint { font-size: .78em; opacity: .8; }
 .panel .legend { font-size: .8em; }
-.c-time { color: var(--sky); font-weight: bold; } .c-bomb { color: var(--ember); font-weight: bold; }
+.c-time { color: var(--sky); font-weight: bold; } .c-life { color: var(--rose); font-weight: bold; } .c-bomb { color: var(--ember); font-weight: bold; }
 .stages { display: flex; gap: 8px; justify-content: center; margin: .3em 0 .6em; flex-wrap: wrap; }
 .chip { font-size: 12px; font-weight: bold; letter-spacing: .06em; padding: 7px 10px; border-radius: 10px; pointer-events: none; cursor: default;
   background: rgba(0,0,0,.3); border: 1px solid rgba(255,244,214,.18); opacity: .55; line-height: 1.2; }
@@ -134,6 +148,13 @@ body { position: fixed; inset: 0; }
 }
 .panel button.main:hover { filter: brightness(1.08); }
 .panel button.main:active { transform: translateY(3px) scale(.97); box-shadow: 0 1px 0 #8a5a00; }
+.panel button.secondary {
+  font: inherit; font-weight: bold; font-size: .95em; padding: .45em 1.3em; margin: .1em 0 .3em; color: var(--gold); background: transparent;
+  border: 2px solid var(--gold); border-radius: 999px; cursor: pointer; transition: transform .08s, background .15s;
+}
+.panel button.secondary:hover { background: rgba(255,201,40,.12); }
+.panel button.secondary:active { transform: scale(.96); }
+.install-info { border: 1px dashed rgba(255,244,214,.35); border-radius: 10px; padding: 8px 10px; }
 .panel button:focus-visible, .mini:focus-visible { outline: 3px solid var(--mint); outline-offset: 3px; }
 
 @media (max-height: 430px) { .panel { padding: 12px 16px; font-size: 15px; } .panel h1 { font-size: 32px; } .panel .hint { display: none; } }

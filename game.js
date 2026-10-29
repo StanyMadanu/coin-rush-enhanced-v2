@@ -5,6 +5,10 @@
   // =====================================================================
   //  SETTINGS - everything you may want to tweak is in this section
   // =====================================================================
+  // Extra features. Set one to false to switch it off (for example a CrazyGames build:
+  // CrazyGames provides its own fullscreen and does not allow custom fullscreen buttons).
+  const FEATURES = { fullscreenButton: true, installApp: true, serviceWorker: true };
+
   const CONFIG = {
     gameSeconds: 60,        // length of one round
     startLives: 3,
@@ -16,10 +20,12 @@
     invincibleSeconds: 1.5, // safe time after being hit
     respawnDelay: 4,        // seconds before a blasted enemy is replaced
     powerupGap: 3,          // minimum seconds between two power-up spawns
-    warnSeconds: 10,        // main timer warning (ticks + pulse) starts here
+    warnSeconds: 10,        // main timer warning (ticks + pulse) starts here (only on stages that have a time limit)
+    maxLives: 5,            // extra lives can never push the player above this
 
     // Stopwatch power-up
     timerPU: {
+      enabled: true,        // Stage 1 turns this off (it has no round timer)
       lifetime: 5,          // seconds on screen if not collected
       blinkFrom: 2,         // starts blinking + ticking after this many seconds (= last 3 seconds)
       bonus: 5,             // seconds added to the round timer
@@ -27,6 +33,16 @@
       interval: [10, 18],   // seconds between spawn attempts
       chance: 0.75,         // probability that an attempt spawns one
       minPlayerDist: 140, maxPlayerDist: 900, radius: 17
+    },
+    // Heart power-up: +1 life (off unless a stage turns it on; Stage 1 does)
+    lifePU: {
+      enabled: false,
+      lifetime: 9,          // seconds on screen if not collected
+      blinkFrom: 6,         // starts blinking after this many seconds (the last 3 seconds)
+      firstDelay: [25, 40], // seconds until the first possible spawn
+      interval: [35, 60],   // seconds between spawn attempts
+      chance: 0.6,          // probability that an attempt spawns one (rare: roughly one every 1-2 minutes)
+      minPlayerDist: 140, maxPlayerDist: 900, radius: 16
     },
     // Bomb power-up
     bomb: {
@@ -46,7 +62,9 @@
       theme: { skyTop: '#120d26', skyBottom: '#1f1745', floorTop: '#2f2560', floorBottom: '#231b4a',
                line: 'rgba(120,100,210,0.16)', gold: '#ffc928', skyline: '#1c1540', accent: '#8f7dff' },
       difficulty: { startObstacles: 3, maxObstacles: 7, obstacleEvery: 15, speedMin: 90, speedMax: 150 },
-      spawn: { maxCoins: 4, timerPU: {}, bomb: {} },   // per-stage overrides of CONFIG.timerPU / CONFIG.bomb
+      rules: { timeLimit: null },   // null = no round timer: the run only ends when all lives are lost. (A stage without
+                                    // "rules" uses CONFIG.gameSeconds, so other stages keep their timer.)
+      spawn: { maxCoins: 4, timerPU: { enabled: false }, lifePU: { enabled: true }, bomb: {} },   // per-stage overrides of CONFIG.timerPU / lifePU / bomb
       drawBackground: drawStage1Background
     },
     { id: 2, name: 'STAGE 2', available: false },
@@ -61,6 +79,7 @@
   const hudEl = $('hud'), scoreEl = $('score'), timeEl = $('time'), timeBox = $('timeBox'), livesEl = $('lives');
   const bombPill = $('bombPill'), bombCount = $('bombCount'), stageTag = $('stageTag');
   const startScreen = $('start'), overScreen = $('over'), pauseScreen = $('pauseScreen');
+  const fsBtn = $('fsBtn'), installBtn = $('installBtn'), installInfo = $('installInfo'), toastEl = $('toast');
   const soundBtn = $('soundBtn'), pauseBtn = $('pauseBtn'), blastBtn = $('blastBtn'), barHint = $('barHint'), safeProbe = $('safe');
   const bg = document.createElement('canvas'), bgCtx = bg.getContext('2d'); // cached stage background
 
@@ -71,11 +90,11 @@
   let W = 800, H = 600, S = 1, B = { x0: 0, y0: TOP, x1: 800, y1: 560 }; // arena size, scale, playable bounds
   let touchMode = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches), portrait = false, barPx = 44;
   let state = 'menu';                   // 'menu' | 'playing' | 'paused' | 'over'
-  let stage = STAGES[0], timerCfg = CONFIG.timerPU, bombCfg = CONFIG.bomb;
+  let stage = STAGES[0], timerCfg = CONFIG.timerPU, lifeCfg = CONFIG.lifePU, bombCfg = CONFIG.bomb, timed = false;
   let score = 0, lives = 3, timeLeft = 60, elapsed = 0, invincible = 0, shake = 0, flash = 0, warnFlash = 0, clock = 0;
   let player = null, coins = [], obstacles = [], respawns = [], particles = [], rings = [], texts = [];
-  let timerPU = null, bombPU = null, bombCharges = 0, blast = null;
-  let timerNext = 0, bombNext = 0, puCooldown = 0, lastTickSec = Infinity;
+  let timerPU = null, bombPU = null, lifePU = null, bombCharges = 0, blast = null, firedTimer = 0;
+  let timerNext = 0, bombNext = 0, lifeNext = 0, puCooldown = 0, lastTickSec = Infinity;
   const keys = {};
   const joy = { active: false, id: null, ox: 0, oy: 0, x: 0, y: 0, px: 0, py: 0 };
   const MAXP = 350;                     // particle limit (performance)
@@ -98,8 +117,9 @@
     gameEl.style.setProperty('--u', S.toFixed(3));
     gameEl.classList.toggle('touch', touchMode);
     gameEl.classList.toggle('portrait', portrait);
-    barPx = !touchMode ? 44 : portrait ? clamp(Math.round(vh * 0.18), 120, 170) : 64;
+    barPx = !touchMode ? 44 : portrait ? clamp(Math.round(vh * 0.18), 132, 170) : 64;
     gameEl.style.setProperty('--bar', barPx + 'px');
+    updateBlastUi();
     barHint.textContent = touchMode ? 'Drag anywhere to move' : 'WASD / arrows to move \u00B7 SPACE to blast';
 
     const cs = getComputedStyle(safeProbe);       // phone notches / rounded corners
@@ -208,6 +228,7 @@
       case 'puTick':       // a = 0,1,2 : three distinct soft pings
         tone([1250, 1500, 1800][a] || 1500, 0.09, 'sine', 0.14); break;
       case 'timerCollect': tone(660, 0.12, 'triangle', 0.1); tone(880, 0.12, 'triangle', 0.1, 0, 0.07); tone(1320, 0.22, 'triangle', 0.1, 0, 0.14); break;
+      case 'lifeCollect':  tone(523, 0.14, 'sine', 0.11); tone(659, 0.14, 'sine', 0.11, 0, 0.08); tone(784, 0.14, 'sine', 0.11, 0, 0.16); tone(1047, 0.3, 'triangle', 0.1, 0, 0.24); break;
       case 'bombCollect':  tone(180, 0.25, 'sawtooth', 0.07, 520); tone(520, 0.18, 'triangle', 0.09, 780, 0.14); break;
       case 'blast':        noise(0.5, 0.3, 1400); tone(150, 0.55, 'sine', 0.28, 38); break;
       case 'destroy':      tone(520, 0.1, 'square', 0.06, 150); break;
@@ -241,14 +262,21 @@
   function resetRound() {
     stopAllSounds();
     timerCfg = merge(CONFIG.timerPU, stage.spawn.timerPU);
+    lifeCfg = merge(CONFIG.lifePU, stage.spawn.lifePU);
     bombCfg = merge(CONFIG.bomb, stage.spawn.bomb);
-    score = 0; lives = CONFIG.startLives; timeLeft = CONFIG.gameSeconds;
+    const rules = stage.rules || {};
+    const limit = 'timeLimit' in rules ? rules.timeLimit : CONFIG.gameSeconds;
+    timed = limit != null;                           // false on Stage 1: no countdown, no time-up
+    gameEl.dataset.timed = String(timed);
+    score = 0; lives = CONFIG.startLives; timeLeft = timed ? limit : Infinity;
     elapsed = 0; invincible = 0; shake = 0; flash = 0; warnFlash = 0;
-    lastTickSec = Infinity; bombCharges = 0; blast = null; timerPU = null; bombPU = null;
+    lastTickSec = Infinity; bombCharges = 0; blast = null; timerPU = null; bombPU = null; lifePU = null;
+    clearTimeout(firedTimer); blastBtn.classList.remove('fired', 'pressed');
     coins = []; obstacles = []; respawns = []; particles = []; rings = []; texts = [];
     puCooldown = 0;
     timerNext = rand(timerCfg.firstDelay[0], timerCfg.firstDelay[1]);
     bombNext = rand(bombCfg.firstDelay[0], bombCfg.firstDelay[1]);
+    lifeNext = rand(lifeCfg.firstDelay[0], lifeCfg.firstDelay[1]);
     player = { x: (B.x0 + B.x1) / 2, y: (B.y0 + B.y1) / 2, r: CONFIG.playerRadius, vx: 0, vy: 0, face: 0 };
     for (let i = 0; i < stage.difficulty.startObstacles; i++) spawnObstacle(true);
     while (coins.length < stage.spawn.maxCoins) spawnCoin();
@@ -286,11 +314,11 @@
     if (state !== 'playing') return;     // the round can only end once
     setState('over');
     stopAllSounds();
-    timerPU = null; bombPU = null; blast = null; bombCharges = 0;
+    timerPU = null; bombPU = null; lifePU = null; blast = null; bombCharges = 0;
     for (const k in keys) keys[k] = false;
     joy.active = false; joy.x = joy.y = 0;
     hud.classList.add('hidden');
-    blastBtn.classList.add('hidden');
+    updateBlastUi();
     let best = 0;
     try { best = Number(localStorage.getItem('coinRushBest')) || 0; } catch (e) {}
     const isNew = score > best;
@@ -314,7 +342,7 @@
       const dp = dist(q, player);
       if (dp < minP || dp > maxP) continue;
       if (obstacles.some((o) => dist(q, o) < 70) || coins.some((c) => dist(q, c) < 40)) continue;
-      if ((timerPU && dist(q, timerPU) < 70) || (bombPU && dist(q, bombPU) < 70)) continue;
+      if ((timerPU && dist(q, timerPU) < 70) || (bombPU && dist(q, bombPU) < 70) || (lifePU && dist(q, lifePU) < 70)) continue;
       return q;
     }
     return null;
@@ -337,6 +365,12 @@
     const q = findSpot(timerCfg.minPlayerDist, timerCfg.maxPlayerDist, 36);
     if (!q) return false;
     timerPU = { x: q.x, y: q.y, r: timerCfg.radius, age: 0, ticked: [false, false, false] };
+    return true;
+  }
+  function spawnLifePU() {
+    const q = findSpot(lifeCfg.minPlayerDist, lifeCfg.maxPlayerDist, 36);
+    if (!q) return false;
+    lifePU = { x: q.x, y: q.y, r: lifeCfg.radius, age: 0 };
     return true;
   }
   function spawnBomb() {
@@ -364,6 +398,8 @@
   function useBlast() {
     if (state !== 'playing' || bombCharges <= 0) return;   // no charge = no blast
     bombCharges = 0;                                       // consume the charge first: one blast per bomb
+    blastBtn.classList.add('fired'); clearTimeout(firedTimer);
+    firedTimer = setTimeout(() => blastBtn.classList.remove('fired'), 450);   // quick "activated" flash on the button
     const R = bombCfg.blastRadius;
     blast = { x: player.x, y: player.y, t: 0, dur: bombCfg.blastDuration, r: R };
     flash = 1;
@@ -387,7 +423,7 @@
     if (!killed) floatText(player.x, player.y - 34, 'BLAST!', '#ffb15c', 20, 0.7);
     updateHud(true);
   }
-  blastBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); blastBtn.classList.add('pressed'); useBlast(); });
+  blastBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); if (bombCharges <= 0) return; blastBtn.classList.add('pressed'); useBlast(); });
   ['pointerup', 'pointercancel', 'pointerleave'].forEach((t) => blastBtn.addEventListener(t, () => blastBtn.classList.remove('pressed')));
 
   // =====================================================================
@@ -395,15 +431,17 @@
   // =====================================================================
   function update(dt) {
     elapsed += dt;
-    timeLeft -= dt;
-    if (timeLeft <= 0) { timeLeft = 0; endGame("Time's up!"); return; }   // checked first: no bonus can extend a finished round
+    if (timed) {                                       // Stage 1 has no round timer
+      timeLeft -= dt;
+      if (timeLeft <= 0) { timeLeft = 0; endGame("Time's up!"); return; }   // checked first: no bonus can extend a finished round
+    }
     if (invincible > 0) invincible -= dt;
     if (shake > 0) shake -= dt;
     if (flash > 0) flash = Math.max(0, flash - dt / 0.18);
     if (warnFlash > 0) warnFlash = Math.max(0, warnFlash - dt / 0.5);
 
     // --- main timer warning: one tick each time the whole-second value changes (final 10 seconds) ---
-    const whole = Math.ceil(timeLeft);
+    const whole = timed ? Math.ceil(timeLeft) : Infinity;
     if (whole > lastTickSec) lastTickSec = whole;           // time was added (bonus): the ticks start again from here
     if (whole <= CONFIG.warnSeconds && whole < lastTickSec) {
       lastTickSec = whole;
@@ -419,7 +457,8 @@
     for (let i = respawns.length - 1; i >= 0; i--) { respawns[i] -= dt; if (respawns[i] <= 0) { respawns.splice(i, 1); spawnObstacle(); } }
     puCooldown = Math.max(0, puCooldown - dt);
     timerNext -= dt;
-    if (timerNext <= 0) {
+    if (timerCfg.enabled === false) timerNext = Infinity;
+    else if (timerNext <= 0) {
       if (timerPU) timerNext = rand(timerCfg.interval[0], timerCfg.interval[1]);
       else if (puCooldown > 0) timerNext = puCooldown + 0.1;
       else { if (Math.random() < timerCfg.chance && spawnTimerPU()) puCooldown = CONFIG.powerupGap; timerNext = rand(timerCfg.interval[0], timerCfg.interval[1]); }
@@ -429,6 +468,14 @@
       if (bombPU || bombCharges > 0) bombNext = rand(bombCfg.interval[0], bombCfg.interval[1]);   // never more than one bomb
       else if (puCooldown > 0) bombNext = puCooldown + 0.1;
       else { if (Math.random() < bombCfg.chance && spawnBomb()) puCooldown = CONFIG.powerupGap; bombNext = rand(bombCfg.interval[0], bombCfg.interval[1]); }
+    }
+
+    lifeNext -= dt;                                      // heart power-up: rare, one at a time, never above the life cap
+    if (lifeCfg.enabled === false) lifeNext = Infinity;
+    else if (lifeNext <= 0) {
+      if (lifePU || lives >= CONFIG.maxLives) lifeNext = rand(lifeCfg.interval[0], lifeCfg.interval[1]);
+      else if (puCooldown > 0) lifeNext = puCooldown + 0.1;
+      else { if (Math.random() < lifeCfg.chance && spawnLifePU()) puCooldown = CONFIG.powerupGap; lifeNext = rand(lifeCfg.interval[0], lifeCfg.interval[1]); }
     }
 
     // --- player movement (keyboard + touch), smoothed ---
@@ -511,6 +558,24 @@
         ring(b.x, b.y, 38, 0.45, '#ff9f43', 4);
         floatText(player.x, player.y - 34, touchMode ? 'BOMB READY!' : 'BOMB READY! SPACE', '#ffb15c', 22, 1.1);
         puCooldown = Math.max(puCooldown, 1);
+      }
+    }
+
+    // --- heart power-up: limited lifetime, awards exactly one life ---
+    if (lifePU) {
+      const h = lifePU; h.age += dt;
+      if (h.age >= lifeCfg.lifetime) lifePU = null;                        // expired: gone
+      else if (dist(h, player) < h.r + player.r) {
+        lifePU = null;                                                     // removed first, so it can only pay out once
+        if (lives < CONFIG.maxLives) {
+          lives++;
+          sfx('lifeCollect');
+          floatText(player.x, player.y - 34, '+1 LIFE', '#ff7fa0', 26, 1.1);
+        } else floatText(player.x, player.y - 34, 'MAX LIVES', '#ff7fa0', 22, 1.0);
+        burst(h.x, h.y, '#ff4d79', 18, 240, 0.6);
+        ring(h.x, h.y, 40, 0.5, '#ff7fa0', 4); ring(player.x, player.y, 34, 0.45, '#ffd0dd', 3);
+        puCooldown = Math.max(puCooldown, 1);
+        updateHud(true);
       }
     }
 
@@ -652,6 +717,24 @@
     ctx.fillStyle = '#0f3a66'; ctx.beginPath(); ctx.arc(0, 0, 2.2, 0, 6.283); ctx.fill();
     ctx.restore();
   }
+  function drawLifePU(h) {               // glowing rose-pink heart with a shrinking ring (time left on screen)
+    const blink = h.age >= lifeCfg.blinkFrom;
+    const a = blink && Math.floor(h.age * 6) % 2 === 1 ? 0.2 : 1;
+    const pulse = 1 + 0.1 * Math.sin(clock * 5), s = h.r * 0.86 * pulse;
+    ctx.save(); ctx.translate(h.x, h.y); ctx.globalAlpha = a;
+    glow(0, 0, h.r * 2.7 * pulse, '255,77,121', 0.5);
+    ctx.strokeStyle = '#ff7fa0'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(0, 0, h.r + 7, -1.5708, -1.5708 + 6.283 * Math.max(0, 1 - h.age / lifeCfg.lifetime)); ctx.stroke();
+    ctx.translate(0, 1);
+    const path = () => { ctx.beginPath(); ctx.moveTo(0, s * 1.15); ctx.bezierCurveTo(-s * 1.75, s * 0.1, -s * 1.3, -s * 1.15, 0, -s * 0.4);
+      ctx.bezierCurveTo(s * 1.3, -s * 1.15, s * 1.75, s * 0.1, 0, s * 1.15); ctx.closePath(); };
+    path(); ctx.fillStyle = '#ff4d79'; ctx.fill(); ctx.strokeStyle = '#b3174a'; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.beginPath(); ctx.ellipse(-s * 0.62, -s * 0.38, s * 0.28, s * 0.18, -0.7, 0, 6.283); ctx.fill();
+    const tw = 0.5 + 0.5 * Math.sin(clock * 9);                              // little sparkle
+    ctx.fillStyle = '#fff'; ctx.globalAlpha = a * (0.4 + 0.6 * tw);
+    ctx.fillRect(h.r * 0.7 - 1, -h.r * 0.9 - 4, 2, 8); ctx.fillRect(h.r * 0.7 - 4, -h.r * 0.9 - 1, 8, 2);
+    ctx.restore();
+  }
   function drawBomb(b) {                  // dark bomb with an orange glow and a flickering fuse
     const blink = bombCfg.lifetime > 0 && b.age > bombCfg.lifetime - 3;
     const a = blink && Math.floor(b.age * 6) % 2 === 1 ? 0.3 : 1;
@@ -724,6 +807,7 @@
       coins.forEach(drawCoin);
       if (bombPU) drawBomb(bombPU);
       if (timerPU) drawStopwatch(timerPU);
+      if (lifePU) drawLifePU(lifePU);
       obstacles.forEach(drawObstacle);
       drawPlayer(player);
       if (blast) drawBlast();
@@ -750,18 +834,27 @@
   // =====================================================================
   const hudCache = {};
   function setText(el, key, val) { if (hudCache[key] !== val) { hudCache[key] = val; el.textContent = val; } }
+  function updateBlastUi() {            // BLAST button: ready (glowing) / unavailable (grey). The "fired" flash is added in useBlast.
+    const ready = bombCharges > 0 && state === 'playing';
+    blastBtn.classList.toggle('off', !ready);
+    blastBtn.setAttribute('aria-disabled', String(!ready));
+    setText(blastBtn.querySelector('small'), 'bs', ready ? (touchMode ? 'READY' : 'SPACE') : 'NO BOMB');
+  }
   function updateHud(force) {
-    const whole = Math.max(0, Math.ceil(timeLeft));
     setText(scoreEl, 's', score);
-    setText(timeEl, 't', whole);
-    const u = whole <= 3 ? 3 : whole <= 5 ? 2 : whole <= CONFIG.warnSeconds ? 1 : 0;
-    if (timeBox.dataset.u !== String(u)) timeBox.dataset.u = String(u);
+    if (timed) {                                       // timer HUD only on stages with a time limit
+      const whole = Math.max(0, Math.ceil(timeLeft));
+      setText(timeEl, 't', whole);
+      const u = whole <= 3 ? 3 : whole <= 5 ? 2 : whole <= CONFIG.warnSeconds ? 1 : 0;
+      if (timeBox.dataset.u !== String(u)) timeBox.dataset.u = String(u);
+    }
     let h = '';
-    for (let i = 0; i < CONFIG.startLives; i++) h += '<span class="heart' + (i < lives ? '' : ' lost') + '">&#9829;</span>';
+    const shown = Math.max(CONFIG.startLives, lives);   // 3 hearts to start; extra lives add hearts (up to maxLives)
+    for (let i = 0; i < shown; i++) h += '<span class="heart' + (i < lives ? '' : ' lost') + '">&#9829;</span>';
     if (hudCache.h !== h) { hudCache.h = h; livesEl.innerHTML = h; }
     setText(bombCount, 'b', bombCharges);
     bombPill.classList.toggle('on', bombCharges > 0);
-    blastBtn.classList.toggle('hidden', !(bombCharges > 0 && state === 'playing'));
+    updateBlastUi();
   }
 
   // =====================================================================
@@ -821,6 +914,88 @@
   pauseBtn.addEventListener('click', () => { if (state === 'playing') pauseGame(); else resumeGame(); });
 
   // =====================================================================
+  //  Small message, fullscreen button, and "Install app" (PWA)
+  // =====================================================================
+  let toastTimer = 0;
+  function showToast(msg) {
+    toastEl.textContent = msg; toastEl.classList.remove('hidden');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.classList.add('hidden'), 3200);
+  }
+  document.querySelectorAll('.mini').forEach((b) => b.addEventListener('click', () => b.blur()));   // so Space never "presses" a button by accident
+
+  // Fullscreen (uses the browser Fullscreen API; hidden where the browser does not offer it, e.g. iPhone Safari)
+  const fsRoot = document.documentElement;
+  const fsRequest = fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen;
+  const fsExit = document.exitFullscreen || document.webkitExitFullscreen;
+  const fsSupported = () => !!(fsRequest && fsExit && (document.fullscreenEnabled || document.webkitFullscreenEnabled));
+  const isFullscreen = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+  function updateFsButton() {
+    fsBtn.classList.toggle('hidden', !(FEATURES.fullscreenButton && fsSupported()));
+    fsBtn.textContent = isFullscreen() ? 'Exit full' : 'Fullscreen';
+    fsBtn.setAttribute('aria-pressed', String(isFullscreen()));
+  }
+  async function toggleFullscreen() {
+    try {
+      if (isFullscreen()) await fsExit.call(document);
+      else { const p = fsRequest.call(fsRoot, { navigationUI: 'hide' }); if (p && p.then) await p; }
+    } catch (err) { showToast('Fullscreen is not available here.'); }
+    updateFsButton();
+  }
+  fsBtn.addEventListener('click', toggleFullscreen);
+  // Also fires when the player presses Escape. The round is untouched: we only refit the arena.
+  ['fullscreenchange', 'webkitfullscreenchange'].forEach((t) => document.addEventListener(t, () => { updateFsButton(); queueFit(); }));
+
+  // Install app. Chrome / Edge / Android: the browser offers an install prompt. iPhone / iPad: show how to add to Home Screen.
+  let installPrompt = null, installed = false;
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isStandalone = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  function updateInstallUi() {
+    let mode = 'none';                                   // hidden when already installed or when installing is not possible
+    if (FEATURES.installApp && !installed && !isStandalone()) mode = installPrompt ? 'prompt' : (isIOS ? 'ios' : 'none');
+    installBtn.classList.toggle('hidden', mode === 'none');
+    installBtn.textContent = mode === 'ios' ? 'Add to Home Screen' : 'Install app';
+    if (mode !== 'ios') installInfo.classList.add('hidden');
+  }
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; updateInstallUi(); });
+  window.addEventListener('appinstalled', () => { installed = true; installPrompt = null; updateInstallUi(); });
+  if (window.matchMedia) { try { matchMedia('(display-mode: standalone)').addEventListener('change', updateInstallUi); } catch (e) {} }
+  installBtn.addEventListener('click', async () => {
+    if (installPrompt) {
+      const p = installPrompt; installPrompt = null; updateInstallUi();   // a browser prompt can only be shown once
+      try {
+        await p.prompt();
+        const choice = await p.userChoice;
+        if (choice && choice.outcome === 'accepted') installed = true;
+        else showToast('No problem. You can install later from your browser menu.');
+      } catch (err) {}
+      updateInstallUi();
+    } else if (isIOS) {
+      installInfo.textContent = 'On iPhone / iPad: tap the Share button in your browser, then choose \u201CAdd to Home Screen\u201D.';
+      installInfo.classList.toggle('hidden');
+    }
+  });
+
+  // Service worker: lets the game start offline after the first visit. It needs https:// (or localhost);
+  // it is skipped when the file is opened straight from a folder (file://).
+  if (FEATURES.serviceWorker && 'serviceWorker' in navigator &&
+      (location.protocol === 'https:' || ['localhost', '127.0.0.1', '[::1]'].indexOf(location.hostname) >= 0)) {
+    window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => {}); }, { once: true });
+  }
+
+  // The start screen text comes from the stage settings, so a stage with a timer says so and Stage 1 does not.
+  function renderStartInfo() {
+    const rules = stage.rules || {}, sp = stage.spawn || {};
+    const limit = 'timeLimit' in rules ? rules.timeLimit : CONFIG.gameSeconds;
+    $('startInfo').innerHTML = 'Grab the gold coins. Dodge the spiky orbs.<br>' +
+      (limit != null ? 'You have ' + CONFIG.startLives + ' lives and ' + limit + ' seconds.' : 'You have ' + CONFIG.startLives + ' lives. Survive as long as you can!');
+    const parts = [];
+    if (limit != null && merge(CONFIG.timerPU, sp.timerPU).enabled) parts.push('<span class="c-time">Stopwatch</span> = +' + CONFIG.timerPU.bonus + ' seconds');
+    if (merge(CONFIG.lifePU, sp.lifePU).enabled) parts.push('<span class="c-life">Heart</span> = +1 life');
+    parts.push('<span class="c-bomb">Bomb</span> = one blast');
+    $('legend').innerHTML = parts.join(' &nbsp;&middot;&nbsp; ');
+  }
+
+  // =====================================================================
   //  Go!
   // =====================================================================
   const chips = $('stageChips');
@@ -835,6 +1010,9 @@
     chips.appendChild(d);
   });
   updateSoundButton();
+  renderStartInfo();
+  updateFsButton();
+  updateInstallUi();
   stageTag.textContent = stage.name;
   fit();
   $('startBtn').focus();
